@@ -153,7 +153,8 @@ def parse_epw_bytes(epw_bytes: bytes) -> tuple[dict, pd.DataFrame, str]:
         io.StringIO("\n".join(data_lines)),
         header=None,
         names=EPW_COLS,
-        na_values=list(NULL_SENTINELS) + [99, 99.9, 999, 9999, 99999],
+        # Treat extreme sentinels as NA here; handle 99/99.9 conditionally below
+        na_values=list(NULL_SENTINELS) + [999, 9999, 99999],
     )
 
     # Vectorized numeric coercion (faster than row-wise apply)
@@ -167,6 +168,20 @@ def parse_epw_bytes(epw_bytes: bytes) -> tuple[dict, pd.DataFrame, str]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
         # Drop extreme EPW sentinels like 9999 etc.
         df.loc[df[c].abs() >= 9000, c] = np.nan
+
+    # If the first data row contains 99 or 99.9 for specific fields,
+    # treat the entire column as missing (NaN)
+    if not df.empty:
+        sentinel_cols = [
+            "Dry Bulb Temperature (C)",
+            "Relative Humidity (%)",
+            "Dew Point Temperature (C)",
+        ]
+        for col in sentinel_cols:
+            if col in df.columns:
+                first_val = df[col].iloc[0]
+                if pd.notna(first_val) and float(first_val) in (99.0, 99.9):
+                    df[col] = np.nan
 
     # Build a proper datetime. EPW uses 1–24 for Hour as the END of the hour.
     # We'll convert to a timestamp at the END of hour, then shift by -1 hour to get start-of-hour timestamps.
@@ -554,8 +569,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         yanchor="middle",
                         font=dict(size=9),
                     ),
-                    margin=dict(l=20, r=160, t=40, b=20),
-                    height=320,
+                    margin=dict(l=20, r=200, t=40, b=20),
+                    height=640,
                 )
 
                 st.plotly_chart(fig, width='stretch')
