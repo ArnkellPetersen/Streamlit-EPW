@@ -828,7 +828,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                 monthly["Month Name"] = ""
         # Reorder to show Month Name first, and hide numeric Year/Month columns for a cleaner view
         display_cols = ["Month Name"] + [c for c in monthly.columns if c not in ("Month Name", "Year", "Month")]
-        st.dataframe(monthly[display_cols], width='stretch')
+        # Ensure the full 13 rows (0..12) are visible without scrolling
+        st.dataframe(monthly[display_cols], width='stretch', height=520)
 
     # ---- Table
     with tab_table:
