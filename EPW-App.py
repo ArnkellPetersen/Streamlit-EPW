@@ -805,6 +805,14 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     with tab_month:
         st.subheader("Monthly summary by Year")
         monthly = compute_monthly_agg(st.session_state.source_key, df)
+        # Backward-compatible: add Month Name if missing (e.g., cached older result)
+        if "Month Name" not in monthly.columns:
+            month_names = {i: name for i, name in enumerate(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]) }
+            month_names[12] = "Year"
+            if "Month" in monthly.columns:
+                monthly["Month Name"] = monthly["Month"].map(month_names)
+            else:
+                monthly["Month Name"] = ""
         # Reorder to show Month Name first, and hide numeric Year/Month columns for a cleaner view
         display_cols = ["Month Name"] + [c for c in monthly.columns if c not in ("Month Name", "Year", "Month")]
         st.dataframe(monthly[display_cols], width='stretch')
