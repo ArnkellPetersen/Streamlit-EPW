@@ -22,6 +22,10 @@ import requests
 import streamlit as st
 import altair as alt
 import plotly.graph_objects as go
+try:
+    from streamlit_javascript import st_javascript
+except Exception:
+    st_javascript = None
 
 # ---------------------------
 # Constants
@@ -153,21 +157,35 @@ def parse_epw_bytes(epw_bytes: bytes) -> tuple[dict, pd.DataFrame, str]:
         io.StringIO("\n".join(data_lines)),
         header=None,
         names=EPW_COLS,
-        # Treat extreme sentinels as NA here; handle 99/99.9 conditionally below
-        na_values=list(NULL_SENTINELS) + [999, 9999, 99999],
+        # Read all columns; select after to avoid pyarrow include_columns issues
+        engine="pyarrow",                     # <-- faster if available (pandas >=2.0)
+        # pyarrow engine requires na_values to be strings
+        na_values=list(NULL_SENTINELS) + ["999", "9999", "99999"],
     )
 
-    # Vectorized numeric coercion (faster than row-wise apply)
-    string_cols = (
-        "Present Weather Observation",
-        "Present Weather Codes",
-        "Data Source and Uncertainty Flags",
-    )
-    numeric_cols = [c for c in EPW_COLS if c not in string_cols]
-    for c in numeric_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-        # Drop extreme EPW sentinels like 9999 etc.
-        df.loc[df[c].abs() >= 9000, c] = np.nan
+    # Keep only the columns we actually use
+    desired_cols = [
+        "Year","Month","Day","Hour","Minute",
+        "Dry Bulb Temperature (C)",
+        "Relative Humidity (%)",
+        "Global Horizontal Radiation (Wh/m2)",
+        "Direct Normal Radiation (Wh/m2)",
+        "Diffuse Horizontal Radiation (Wh/m2)",
+        "Wind Speed (m/s)",
+        "Wind Direction (deg)",
+    ]
+    df = df[[c for c in desired_cols if c in df.columns]]
+
+    # Numeric coercion, sentinel cleanup, rounding, and downcast to float32
+    for c in df.columns:
+        if c not in ("Year","Month","Day","Hour","Minute"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+            # Mask extreme EPW sentinels like 9999 etc.
+            df.loc[df[c].abs() >= 9000, c] = np.nan
+            # Round to 1 decimal to reduce payload and stabilize plots
+            df[c] = df[c].round(1).astype("float32")
+
+    # Columns are now numeric, rounded, and downcast; no additional coercion here
 
     # If the first data row contains 99 or 99.9 for specific fields,
     # treat the entire column as missing (NaN)
@@ -271,9 +289,132 @@ with left:
     st.caption("Drop a .epw file, or paste a direct .epw URL.")
 with right:
     try:
-        st.image("Logos/NMBU_Logo_Bokmaal_RGB.png", caption="", width=240)
+        st.image("Logos/NMBU_Logo_Bokmaal_RGB.png", caption="", width=600)
     except Exception:
         pass
+
+# Measure available container width to avoid first-draw resizing
+def _get_container_width(default: int = 1000) -> int:
+    try:
+        if st_javascript is None:
+            return default
+        js = """
+        (() => {
+          const el = parent.document.querySelector('.block-container');
+          return el ? el.clientWidth : window.innerWidth;
+        })()
+        """
+        val = st_javascript(js)
+        w = int(float(val)) if val is not None else default
+        return max(320, min(w, 2000))
+    except Exception:
+        return default
+
+PLOT_WIDTH = _get_container_width()
+
+# Cached chart builders to avoid redraw cost on reruns/tab switches
+@st.cache_data(show_spinner=False)
+def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) -> dict:
+    df = st.session_state.df
+    plot_df = df[list(cols)]
+    fig = go.Figure()
+    if res == "Hourly (raw)":
+        plot_df = plot_df.round(1)
+        for col in plot_df.columns:
+            fig.add_trace(go.Scattergl(x=plot_df.index, y=plot_df[col], name=col, mode="lines"))
+    else:
+        rule = {"Daily mean": "D", "Weekly mean": "W", "Monthly mean": "M"}[res]
+        agg_df = plot_df.resample(rule).mean().round(1)
+        for col in agg_df.columns:
+            fig.add_trace(go.Scatter(x=agg_df.index, y=agg_df[col], name=col, mode="lines"))
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width)
+    return fig.to_dict()
+
+@st.cache_data(show_spinner=False)
+def build_radiation_fig(source_key: str, width: int) -> dict:
+    df = st.session_state.df
+    cols = [
+        "Global Horizontal Radiation (Wh/m2)",
+        "Direct Normal Radiation (Wh/m2)",
+        "Diffuse Horizontal Radiation (Wh/m2)",
+    ]
+    fig = go.Figure()
+    for col in cols:
+        fig.add_trace(go.Scatter(x=df.index, y=df[col].round(1), name=col, mode="lines"))
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
+    return fig.to_dict()
+
+@st.cache_data(show_spinner=False)
+def build_wind_speed_fig(source_key: str, width: int) -> dict:
+    df = st.session_state.df
+    fig = go.Figure(go.Scatter(x=df.index, y=df["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
+    return fig.to_dict()
+
+@st.cache_data(show_spinner=False)
+def build_windrose_fig_cached(source_key: str, width: int) -> dict:
+    df = st.session_state.df
+    needed = {"Wind Speed (m/s)", "Wind Direction (deg)"}
+    if not needed.issubset(df.columns) or df.empty:
+        return go.Figure().to_dict()
+    w = df[list(needed)].dropna()
+    if len(w) == 0:
+        return go.Figure().to_dict()
+    speeds = np.clip(w["Wind Speed (m/s)"].to_numpy(dtype=float), a_min=0, a_max=None)
+    dirs = (w["Wind Direction (deg)"].to_numpy(dtype=float) % 360.0)
+    calm_mask = speeds < 0.2
+    nb = 16
+    sector_width = 360.0 / nb
+    dirs_nc = dirs[~calm_mask]
+    speeds_nc = speeds[~calm_mask]
+    sectors = np.floor(dirs_nc / sector_width).astype(int) % nb
+    cat_edges = np.array([0.2, 1.6, 3.4, 5.5, 8.0, 10.8])
+    idx = np.digitize(speeds_nc, bins=cat_edges, right=False)
+    cat_idx = np.clip(idx - 1, 0, 5)
+    cat_labels = ["0.2–1.5", "1.6–3.3", "3.4–5.4", "5.5–7.9", "8.0–10.7", "10.8+"]
+    cat_colors = ["#deebf7", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"]
+    counts = np.zeros((nb, len(cat_labels)), dtype=int)
+    if len(sectors) > 0:
+        np.add.at(counts, (sectors, cat_idx), 1)
+    total = counts.sum()
+    perc = (counts / total * 100.0) if total > 0 else counts.astype(float)
+    angle_centers = (np.arange(nb) * sector_width + sector_width / 2.0)
+    widths = [sector_width] * nb
+    fig = go.Figure()
+    for j, label in enumerate(cat_labels):
+        fig.add_trace(go.Barpolar(theta=angle_centers, r=perc[:, j], width=widths, name=label, marker_color=cat_colors[j], marker_line_color="white", marker_line_width=0.5, opacity=0.9))
+    fig.update_layout(
+        title=dict(text="Windrose (frequency by direction)", font=dict(size=10)),
+        polar=dict(
+            angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=9)),
+            radialaxis=dict(tickfont=dict(size=9), ticksuffix="%", angle=90),
+        ),
+        legend=dict(orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=9)),
+        margin=dict(l=20, r=200, t=40, b=20),
+        height=640,
+        width=width,
+    )
+    return fig.to_dict()
+
+@st.cache_data(show_spinner=False)
+def compute_heatmap_grid(source_key: str, var: str) -> pd.DataFrame:
+    df = st.session_state.df
+    if "Hour" in df.columns:
+        hours = pd.to_numeric(df["Hour"], errors="coerce").fillna(1).astype(int).clip(1, 24)
+    else:
+        hours = (df.index.hour + 1).astype(int)
+    grid_src = pd.DataFrame({
+        "DOY": df.index.dayofyear,
+        "Hour": hours.values,
+        "Value": df[var].values,
+    }, index=df.index)
+    return grid_src.drop_duplicates(subset=["DOY", "Hour"])[["DOY", "Hour", "Value"]]
+
+@st.cache_data(show_spinner=False)
+def compute_xy_tidy(source_key: str, x_var: str, y_vars: tuple) -> pd.DataFrame:
+    df = st.session_state.df
+    plot_df = df[[x_var] + list(y_vars)].dropna()
+    return plot_df.melt(id_vars=[x_var], var_name="Variable", value_name="Value")
 
 example_url = (
     "https://klimadataforbygninger.no/FATMY/epw/TMY-NO-1991-2020/TMYNO_Oslo_CERRA_1991-2020.epw"
@@ -438,11 +579,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         sel = st.multiselect("Variables", cols, default=[cols[0], cols[1]])
         res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=0)
         if sel:
-            plot_df = df[sel]
-            if res != "Hourly (raw)":
-                rule = {"Daily mean": "D", "Weekly mean": "W", "Monthly mean": "M"}[res]
-                plot_df = plot_df.resample(rule).mean()
-            st.line_chart(plot_df)
+            fig_dict = build_time_series_fig(st.session_state.source_key, tuple(sel), res, PLOT_WIDTH)
+            st.plotly_chart(go.Figure(fig_dict), theme="streamlit")
         st.caption("Choose resolution to reduce points; timestamps normalized to start-of-hour.")
 
     # ---- XY Scatter
@@ -471,18 +609,16 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                     color=alt.Color("Variable:N", legend=alt.Legend(title="Y variable")),
                     tooltip=["Variable", alt.Tooltip(f"{x_var}:Q", format=".2f"), alt.Tooltip("Value:Q", format=".2f")],
                 )
+                .properties(height=360, width=PLOT_WIDTH-40)
                 .interactive()
             )
-            st.altair_chart(chart, width='stretch')
+            st.altair_chart(chart)
 
     # ---- Radiation
     with tab_rad:
         st.subheader("Irradiance components (hourly)")
-        st.line_chart(df[[
-            "Global Horizontal Radiation (Wh/m2)",
-            "Direct Normal Radiation (Wh/m2)",
-            "Diffuse Horizontal Radiation (Wh/m2)",
-        ]])
+        rad_fig = build_radiation_fig(st.session_state.source_key, PLOT_WIDTH)
+        st.plotly_chart(go.Figure(rad_fig), theme="streamlit")
         st.caption("Global (GHI), Direct Normal (DNI), and Diffuse (DHI) radiation.")
 
     # ---- Windrose
@@ -491,7 +627,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
 
         # Show wind speed time series for full period
         if "Wind Speed (m/s)" in df.columns:
-            st.line_chart(df[["Wind Speed (m/s)"]])
+            w_fig = build_wind_speed_fig(st.session_state.source_key, PLOT_WIDTH)
+            st.plotly_chart(go.Figure(w_fig), theme="streamlit")
 
         # Compute and render windrose for full period with 16 sectors and speed categories
         needed = {"Wind Speed (m/s)", "Wind Direction (deg)"}
@@ -573,7 +710,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                     height=640,
                 )
 
-                st.plotly_chart(fig, width='stretch')
+                fig.update_layout(width=PLOT_WIDTH)
+                st.plotly_chart(fig)
 
                 # Calm hours percentage (<0.2 m/s)
                 st.caption(f"Calm (<0.2 m/s): {calm_pct:.1f}% of hours")
@@ -608,6 +746,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         # Keep a single hourly value per DOY×Hour; drop duplicates if any (no aggregation)
         grid = grid_src.drop_duplicates(subset=["DOY", "Hour"]).rename(columns={var: "Value"})[["DOY", "Hour", "Value"]]
 
+        # round values for display
+        grid["Value"] = pd.to_numeric(grid["Value"], errors="coerce").round(1)
         heat = (
             alt.Chart(grid)
             .mark_rect()
@@ -615,10 +755,11 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                 x=alt.X("DOY:O", title="Day of year (1-366)"),
                 y=alt.Y("Hour:O", title="Hour of day (1-24)"),
                 color=alt.Color("Value:Q", title=f"{var}", scale=alt.Scale(scheme="viridis")),
-                tooltip=["DOY", "Hour", alt.Tooltip("Value:Q", format=".2f")],
+                tooltip=["DOY", "Hour", alt.Tooltip("Value:Q", format=".1f")],
             )
+            .properties(height=360, width=PLOT_WIDTH-40)
         )
-        st.altair_chart(heat, width='stretch')
+        st.altair_chart(heat)
 
     # ---- Monthly aggregates
     with tab_month:

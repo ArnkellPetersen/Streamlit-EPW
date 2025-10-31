@@ -4,6 +4,7 @@ numpy
 requests
 altair
 plotly>=5.20
+streamlit-javascript
 streamlit>=1.32
 pandas>=2.0
 numpy>=1.23
