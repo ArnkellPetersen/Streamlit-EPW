@@ -21,8 +21,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import altair as alt
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import plotly.graph_objects as go
 
 # ---------------------------
 # Constants
@@ -174,7 +173,7 @@ def parse_epw_bytes(epw_bytes: bytes) -> tuple[dict, pd.DataFrame, str]:
     # Many EPWs set Minute=60; we will normalize to 0 minutes after the shift.
     dt = pd.to_datetime(
         {
-            "year": df["Year"].fillna(method="ffill").astype(int),
+            "year": df["Year"].ffill().astype(int),
             "month": df["Month"].astype(int),
             "day": df["Day"].astype(int),
         },
@@ -405,7 +404,22 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         lat = meta.get("latitude", np.nan)
         lon = meta.get("longitude", np.nan)
         if pd.notna(lat) and pd.notna(lon):
-            st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
+            fig = go.Figure(
+                go.Scattergeo(
+                    lat=[lat],
+                    lon=[lon],
+                    mode="markers",
+                    marker=dict(size=8, color="#1f77b4"),
+                )
+            )
+            fig.update_geos(
+                projection_type="natural earth",
+                showcountries=True,
+                showcoastlines=True,
+                fitbounds="locations",
+            )
+            fig.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig, width='stretch')
             st.caption(f"Pin at latitude {lat:.4f}, longitude {lon:.4f}.")
         else:
             st.info("This EPW lacks valid latitude/longitude metadata.")
@@ -514,47 +528,52 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                 total = counts.sum()
                 perc = (counts / total * 100.0) if total > 0 else counts.astype(float)
 
-                # Angles (centers) and bar width in radians
-                angles = np.deg2rad(np.arange(nb) * sector_width + sector_width / 2.0)
-                width = np.deg2rad(sector_width)
+                # Angles (centers) in degrees for Plotly barpolar
+                angle_centers = (np.arange(nb) * sector_width + sector_width / 2.0)
+                widths = [sector_width] * nb
 
-                fig, ax = plt.subplots(figsize=(3.0, 2.5), subplot_kw=dict(polar=True))
-                # Leave more space on the right for legend (push farther out)
-                fig.subplots_adjust(right=0.72)
-                bottom = np.zeros(nb)
-                legend_handles = []
+                fig = go.Figure()
                 for j, label in enumerate(cat_labels):
-                    h = perc[:, j]
-                    ax.bar(
-                        angles,
-                        h,
-                        width=width,
-                        bottom=bottom,
-                        color=cat_colors[j],
-                        edgecolor="white",
-                        alpha=0.9,
-                        align="center",
+                    fig.add_trace(
+                        go.Barpolar(
+                            theta=angle_centers,
+                            r=perc[:, j],
+                            width=widths,
+                            name=label,
+                            marker_color=cat_colors[j],
+                            marker_line_color="white",
+                            marker_line_width=0.5,
+                            opacity=0.9,
+                        )
                     )
-                    bottom = bottom + h
-                    legend_handles.append(mpatches.Patch(color=cat_colors[j], label=label))
 
-                ax.set_theta_zero_location('N')
-                ax.set_theta_direction(-1)
-                ax.set_title("Windrose (frequency by direction)", va='bottom', fontsize=6)
-                # Show percentage rings with smaller labels
-                ax.set_yticklabels([f"{int(y)}%" for y in ax.get_yticks()])
-                ax.tick_params(axis='y', labelsize=6)
-                ax.tick_params(axis='x', labelsize=6)
-                ax.legend(
-                    handles=legend_handles,
-                    loc='center left',
-                    bbox_to_anchor=(1.15, 0.5),
-                    borderaxespad=0.0,
-                    frameon=False,
-                    prop={'size': 6},
+                fig.update_layout(
+                    title=dict(text="Windrose (frequency by direction)", font=dict(size=10)),
+                    polar=dict(
+                        angularaxis=dict(
+                            direction="clockwise",
+                            rotation=90,  # 0° at North
+                            tickfont=dict(size=9),
+                        ),
+                        radialaxis=dict(
+                            tickfont=dict(size=9),
+                            ticksuffix="%",
+                            angle=90,
+                        ),
+                    ),
+                    legend=dict(
+                        orientation="v",
+                        x=1.2,
+                        xanchor="left",
+                        y=0.5,
+                        yanchor="middle",
+                        font=dict(size=9),
+                    ),
+                    margin=dict(l=20, r=160, t=40, b=20),
+                    height=320,
                 )
 
-                st.pyplot(fig)
+                st.plotly_chart(fig, width='stretch')
 
                 # Calm hours percentage (<0.2 m/s)
                 st.caption(f"Calm (<0.2 m/s): {calm_pct:.1f}% of hours")
