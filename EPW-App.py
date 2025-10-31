@@ -260,13 +260,20 @@ def monthly_agg(df: pd.DataFrame) -> pd.DataFrame:
     }).reset_index()
 
     # Yearly summary (13th row): Month = 12
+    # Means are over all hours; radiation is the sum of monthly sums
+    rad_cols = [
+        "GHI sum (kWh/m2)",
+        "DNI sum (kWh/m2)",
+        "DHI sum (kWh/m2)",
+    ]
+    rad_sums = out[rad_cols].sum(numeric_only=True)
     yearly = pd.DataFrame({
         "Year": [int(df.index.year.min()) if df.index.year.notna().any() else 0],
         "Month": [12],
         "T_mean (C)": [df["Dry Bulb Temperature (C)"].mean()],
-        "GHI sum (kWh/m2)": [df["Global Horizontal Radiation (Wh/m2)"].sum() / 1000.0],
-        "DNI sum (kWh/m2)": [df["Direct Normal Radiation (Wh/m2)"].sum() / 1000.0],
-        "DHI sum (kWh/m2)": [df["Diffuse Horizontal Radiation (Wh/m2)"].sum() / 1000.0],
+        "GHI sum (kWh/m2)": [rad_sums.get("GHI sum (kWh/m2)", 0.0)],
+        "DNI sum (kWh/m2)": [rad_sums.get("DNI sum (kWh/m2)", 0.0)],
+        "DHI sum (kWh/m2)": [rad_sums.get("DHI sum (kWh/m2)", 0.0)],
         "Wind mean (m/s)": [df["Wind Speed (m/s)"].mean()],
         "RH mean (%)": [df["Relative Humidity (%)"].mean()],
     })
