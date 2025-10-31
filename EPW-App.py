@@ -404,22 +404,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         lat = meta.get("latitude", np.nan)
         lon = meta.get("longitude", np.nan)
         if pd.notna(lat) and pd.notna(lon):
-            fig = go.Figure(
-                go.Scattergeo(
-                    lat=[lat],
-                    lon=[lon],
-                    mode="markers",
-                    marker=dict(size=8, color="#1f77b4"),
-                )
-            )
-            fig.update_geos(
-                projection_type="natural earth",
-                showcountries=True,
-                showcoastlines=True,
-                fitbounds="locations",
-            )
-            fig.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, width='stretch')
+            st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
             st.caption(f"Pin at latitude {lat:.4f}, longitude {lon:.4f}.")
         else:
             st.info("This EPW lacks valid latitude/longitude metadata.")

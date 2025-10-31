@@ -3,7 +3,7 @@ pandas
 numpy
 requests
 altair
-matplotlib
+plotly>=5.20
 streamlit>=1.32
 pandas>=2.0
 numpy>=1.23
