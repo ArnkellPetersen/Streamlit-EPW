@@ -614,6 +614,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
             "Wind Speed (m/s)",
+            "Wind Direction (deg)",
             "Relative Humidity (%)",
         ]
         sel = st.multiselect("Variables", cols, default=[cols[0], cols[1]])
@@ -634,20 +635,24 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
             "Wind Speed (m/s)",
+            "Wind Direction (deg)",
         ]
         x_var = st.selectbox("X axis", numeric_cols, index=0)
-        y_vars = st.multiselect("Y axis (one or more)", numeric_cols, default=["Global Horizontal Radiation (Wh/m2)"])
-        if x_var and y_vars:
-            plot_df = df[[x_var] + y_vars].dropna()
-            tidy = plot_df.melt(id_vars=[x_var], var_name="Variable", value_name="Value")
+        y_var = st.selectbox("Y axis", numeric_cols, index=1)
+        if x_var and y_var:
+            plot_df = df[[x_var, y_var]].dropna().copy()
+            plot_df[x_var] = plot_df[x_var].round(1)
+            plot_df[y_var] = plot_df[y_var].round(1)
             chart = (
-                alt.Chart(tidy)
+                alt.Chart(plot_df)
                 .mark_circle(size=28, opacity=0.4)
                 .encode(
                     x=alt.X(f"{x_var}:Q", title=x_var),
-                    y=alt.Y("Value:Q", title="Value"),
-                    color=alt.Color("Variable:N", legend=alt.Legend(title="Y variable")),
-                    tooltip=["Variable", alt.Tooltip(f"{x_var}:Q", format=".1f"), alt.Tooltip("Value:Q", format=".1f")],
+                    y=alt.Y(f"{y_var}:Q", title=y_var),
+                    tooltip=[
+                        alt.Tooltip(f"{x_var}:Q", title=x_var, format=".1f"),
+                        alt.Tooltip(f"{y_var}:Q", title=y_var, format=".1f"),
+                    ],
                 )
                 .properties(height=360, width=PLOT_WIDTH-40)
                 .interactive()
@@ -768,6 +773,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
             "Wind Speed (m/s)",
+            "Wind Direction (deg)",
         ]
         var = st.selectbox("Variable", heat_cols, index=0)
 
