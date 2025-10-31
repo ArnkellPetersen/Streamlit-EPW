@@ -177,13 +177,22 @@ def parse_epw_bytes(epw_bytes: bytes) -> tuple[dict, pd.DataFrame, str]:
     df = df[[c for c in desired_cols if c in df.columns]]
 
     # Numeric coercion, sentinel cleanup, rounding, and downcast to float32
+    radiation_cols = {
+        "Global Horizontal Radiation (Wh/m2)",
+        "Direct Normal Radiation (Wh/m2)",
+        "Diffuse Horizontal Radiation (Wh/m2)",
+    }
     for c in df.columns:
         if c not in ("Year","Month","Day","Hour","Minute"):
             df[c] = pd.to_numeric(df[c], errors="coerce")
             # Mask extreme EPW sentinels like 9999 etc.
             df.loc[df[c].abs() >= 9000, c] = np.nan
-            # Round to 1 decimal to reduce payload and stabilize plots
-            df[c] = df[c].round(1).astype("float32")
+            # Radiation to 0 decimals; others to 1 decimal
+            if c in radiation_cols:
+                df[c] = df[c].round(0)
+            else:
+                df[c] = df[c].round(1)
+            df[c] = df[c].astype("float32")
 
     # Columns are now numeric, rounded, and downcast; no additional coercion here
 
@@ -238,7 +247,9 @@ def fetch_epw(url: str) -> tuple[dict, pd.DataFrame, str]:
 
 
 def monthly_agg(df: pd.DataFrame) -> pd.DataFrame:
-    g = df.groupby([df.index.year.rename("Year"), df.index.month.rename("Month")])
+    # Monthly groups with Month indexed 0..11 (0=Jan, 11=Dec)
+    month0 = (df.index.month - 1).rename("Month")
+    g = df.groupby([df.index.year.rename("Year"), month0])
     out = pd.DataFrame({
         "T_mean (C)": g["Dry Bulb Temperature (C)"].mean(),
         "GHI sum (kWh/m2)": g["Global Horizontal Radiation (Wh/m2)"].sum() / 1000.0,
@@ -246,8 +257,33 @@ def monthly_agg(df: pd.DataFrame) -> pd.DataFrame:
         "DHI sum (kWh/m2)": g["Diffuse Horizontal Radiation (Wh/m2)"].sum() / 1000.0,
         "Wind mean (m/s)": g["Wind Speed (m/s)"].mean(),
         "RH mean (%)": g["Relative Humidity (%)"].mean(),
+    }).reset_index()
+
+    # Yearly summary (13th row): Month = 12
+    yearly = pd.DataFrame({
+        "Year": [int(df.index.year.min()) if df.index.year.notna().any() else 0],
+        "Month": [12],
+        "T_mean (C)": [df["Dry Bulb Temperature (C)"].mean()],
+        "GHI sum (kWh/m2)": [df["Global Horizontal Radiation (Wh/m2)"].sum() / 1000.0],
+        "DNI sum (kWh/m2)": [df["Direct Normal Radiation (Wh/m2)"].sum() / 1000.0],
+        "DHI sum (kWh/m2)": [df["Diffuse Horizontal Radiation (Wh/m2)"].sum() / 1000.0],
+        "Wind mean (m/s)": [df["Wind Speed (m/s)"].mean()],
+        "RH mean (%)": [df["Relative Humidity (%)"].mean()],
     })
-    return out.reset_index()
+
+    full = pd.concat([out, yearly], ignore_index=True)
+    # Round all physical values to 1 decimal
+    val_cols = [c for c in full.columns if c not in ("Year", "Month")]
+    full[val_cols] = full[val_cols].astype(float).round(1)
+
+    # Add friendly month names with 0..11 = Jan..Dec and 12 = Year
+    month_names = {i: name for i, name in enumerate(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]) }
+    month_names[12] = "Year"
+    full["Month Name"] = full["Month"].map(month_names)
+
+    # Sort by Year then Month 0..12
+    full = full.sort_values(["Year", "Month"], ascending=[True, True]).reset_index(drop=True)
+    return full
 
 
 @st.cache_data(show_spinner=False)
@@ -328,6 +364,8 @@ def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) ->
         for col in agg_df.columns:
             fig.add_trace(go.Scatter(x=agg_df.index, y=agg_df[col], name=col, mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width)
+    # Show months on x-axis (no year)
+    fig.update_xaxes(dtick="M1", tickformat="%b")
     return fig.to_dict()
 
 @st.cache_data(show_spinner=False)
@@ -342,6 +380,7 @@ def build_radiation_fig(source_key: str, width: int) -> dict:
     for col in cols:
         fig.add_trace(go.Scatter(x=df.index, y=df[col].round(1), name=col, mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
+    fig.update_xaxes(dtick="M1", tickformat="%b")
     return fig.to_dict()
 
 @st.cache_data(show_spinner=False)
@@ -349,6 +388,7 @@ def build_wind_speed_fig(source_key: str, width: int) -> dict:
     df = st.session_state.df
     fig = go.Figure(go.Scatter(x=df.index, y=df["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
+    fig.update_xaxes(dtick="M1", tickformat="%b")
     return fig.to_dict()
 
 @st.cache_data(show_spinner=False)
@@ -607,7 +647,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                     x=alt.X(f"{x_var}:Q", title=x_var),
                     y=alt.Y("Value:Q", title="Value"),
                     color=alt.Color("Variable:N", legend=alt.Legend(title="Y variable")),
-                    tooltip=["Variable", alt.Tooltip(f"{x_var}:Q", format=".2f"), alt.Tooltip("Value:Q", format=".2f")],
+                    tooltip=["Variable", alt.Tooltip(f"{x_var}:Q", format=".1f"), alt.Tooltip("Value:Q", format=".1f")],
                 )
                 .properties(height=360, width=PLOT_WIDTH-40)
                 .interactive()
@@ -765,7 +805,9 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     with tab_month:
         st.subheader("Monthly summary by Year")
         monthly = compute_monthly_agg(st.session_state.source_key, df)
-        st.dataframe(monthly, width='stretch')
+        # Reorder to show Month Name first, and hide numeric Year/Month columns for a cleaner view
+        display_cols = ["Month Name"] + [c for c in monthly.columns if c not in ("Month Name", "Year", "Month")]
+        st.dataframe(monthly[display_cols], width='stretch')
 
     # ---- Table
     with tab_table:
