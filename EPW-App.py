@@ -36,7 +36,6 @@ EPW_COLS = [
     "Dry Bulb Temperature (C)",
     "Dew Point Temperature (C)",
     "Relative Humidity (%)",
-    "Atmospheric Station Pressure (Pa)",
     "Extraterrestrial Horizontal Radiation (Wh/m2)",
     "Extraterrestrial Direct Normal Radiation (Wh/m2)",
     "Horizontal Infrared Radiation Intensity (Wh/m2)",
@@ -326,13 +325,13 @@ def compute_quick_metrics(source_key: str, df: pd.DataFrame) -> dict:
 # ---------------------------
 st.set_page_config(page_title="NMBU - EPW Viewer", layout="wide")
 
-left, right = st.columns([7, 1])
+left, right = st.columns([7, 3])
 with left:
     st.title("NMBU - EPW Viewer")
     st.caption("Drop a .epw file, or paste a direct .epw URL.")
 with right:
     try:
-        st.image("Logos/NMBU_Logo_Bokmaal_RGB.png", caption="", width=600)
+        st.image("Logos/NMBU_Logo_English_RGB.png", caption="", width='stretch')
     except Exception:
         pass
 
@@ -432,13 +431,13 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
     for j, label in enumerate(cat_labels):
         fig.add_trace(go.Barpolar(theta=angle_centers, r=perc[:, j], width=widths, name=label, marker_color=cat_colors[j], marker_line_color="white", marker_line_width=0.5, opacity=0.9))
     fig.update_layout(
-        title=dict(text=f"Windrose (frequency by direction) — Calm: {calm_pct:.1f}%", font=dict(size=20)),
+        title=dict(text="Windrose (frequency by direction)", font=dict(size=20)),
         polar=dict(
             angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=18)),
             radialaxis=dict(tickfont=dict(size=18), ticksuffix="%", angle=90),
         ),
-        legend=dict(title=dict(text="m/s"), orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
-        margin=dict(l=20, r=200, t=40, b=80),
+        legend=dict(orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
+        margin=dict(l=20, r=200, t=40, b=30),
         height=640,
         width=width,
     )
@@ -499,7 +498,7 @@ with st.sidebar:
     )
     url = st.text_input("EPW URL", value=example_url, help="Direct URL to a .epw file")
     st.markdown("---")
-    st.write("Tip: Works with any reachable URL. For private files, host behind a temporary link.")
+    # Tip removed per request
 
 # --- Session state for auto-load and dedup ---
 if "last_url" not in st.session_state:
@@ -565,17 +564,17 @@ if st.session_state.df is not None and st.session_state.meta is not None:
 
     # ---- Sidebar metadata
     with st.sidebar:
-        st.subheader("Location")
+        st.caption("Location")
         city = (meta.get("city") or "").strip()
         region = (meta.get("region") or "").strip()
         country = (meta.get("country") or "").strip()
         # Hide 'None' or empty regions and avoid odd punctuation
         show_region = region and region.lower() != "none"
         if show_region:
-            loc_line = f"**{city}**, {region} {country}".strip()
+            loc_line = f"{city}, {region} {country}".strip()
         else:
-            loc_line = f"**{city}** {country}".strip()
-        st.write(loc_line)
+            loc_line = f"{city} {country}".strip()
+        st.markdown(f"<div style='font-size: 26px; font-weight: 600; line-height: 1.2'>{loc_line}</div>", unsafe_allow_html=True)
         colA, colB = st.columns(2)
         with colA:
             st.metric("Latitude", f"{meta.get('latitude', np.nan):.4f}")
@@ -599,8 +598,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     st.markdown("---")
 
     # Tabs
-    tab_map, tab_ts, tab_xy, tab_heat, tab_rad, tab_windrose, tab_month, tab_table = st.tabs([
-        "Map", "Time Series", "XY Scatter", "Heatmap", "Radiation", "Windrose", "Monthly", "Table",
+    tab_map, tab_ts, tab_xy, tab_heat, tab_windrose, tab_month, tab_table = st.tabs([
+        "Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table",
     ])
     # ---- Map
     with tab_map:
@@ -626,7 +625,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             "Relative Humidity (%)",
         ]
         sel = st.multiselect("Variables", cols, default=[cols[0], cols[1]])
-        res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=0)
+        res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=1)
         if sel:
             fig_dict = build_time_series_fig(st.session_state.source_key, tuple(sel), res, PLOT_WIDTH)
             st.plotly_chart(go.Figure(fig_dict), theme="streamlit", config={"staticPlot": True})
@@ -638,7 +637,6 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         numeric_cols = [
             "Dry Bulb Temperature (C)",
             "Relative Humidity (%)",
-            "Atmospheric Station Pressure (Pa)",
             "Global Horizontal Radiation (Wh/m2)",
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
@@ -667,12 +665,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             )
             st.altair_chart(chart)
 
-    # ---- Radiation
-    with tab_rad:
-        st.subheader("Irradiance components (hourly)")
-        rad_fig = build_radiation_fig(st.session_state.source_key, PLOT_WIDTH)
-        st.plotly_chart(go.Figure(rad_fig), theme="streamlit")
-        st.caption("Global (GHI), Direct Normal (DNI), and Diffuse (DHI) radiation.")
+    
 
     # ---- Windrose
     with tab_windrose:
@@ -681,7 +674,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         # Show wind speed time series for full period
         if "Wind Speed (m/s)" in df.columns:
             w_fig = build_wind_speed_fig(st.session_state.source_key, PLOT_WIDTH)
-            st.plotly_chart(go.Figure(w_fig), theme="streamlit")
+            st.plotly_chart(go.Figure(w_fig), theme="streamlit", config={"staticPlot": True})
 
         # Compute and render windrose for full period with 16 sectors and speed categories
         needed = {"Wind Speed (m/s)", "Wind Direction (deg)"}
@@ -737,9 +730,8 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         )
                     )
 
-                title_text = f"Windrose (frequency by direction) — Calm: {calm_pct:.1f}%"
                 fig.update_layout(
-                    title=dict(text=title_text, font=dict(size=20)),
+                    title=dict(text="Windrose (frequency by direction)", font=dict(size=20)),
                     polar=dict(
                         angularaxis=dict(
                             direction="clockwise",
@@ -753,7 +745,6 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         ),
                     ),
                     legend=dict(
-                        title=dict(text="m/s"),
                         orientation="v",
                         x=1.2,
                         xanchor="left",
@@ -761,12 +752,14 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         yanchor="middle",
                         font=dict(size=18),
                     ),
-                    margin=dict(l=20, r=200, t=40, b=80),
+                    margin=dict(l=20, r=200, t=40, b=40),
                     height=640,
                 )
 
                 fig.update_layout(width=PLOT_WIDTH)
                 st.plotly_chart(fig)
+                # Calm hours percentage (<0.2 m/s) for full period
+                st.caption(f"Calm (<0.2 m/s): {calm_pct:.1f}% of hours")
 
                 # Seasonal windroses: Summer (Q2+Q3) and Winter (Q4+Q1)
                 try:
@@ -801,12 +794,12 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         for j2, lb in enumerate(labels):
                             f2.add_trace(go.Barpolar(theta=ang, r=perc2[:, j2], width=widths2, name=lb, marker_color=colors[j2], marker_line_color="white", marker_line_width=0.5, opacity=0.9))
                         f2.update_layout(
-                            title=dict(text=f"{title_text} — Calm: {calm_pct2:.1f}%", font=dict(size=20)),
+                            title=dict(text=title_text, font=dict(size=20)),
                             polar=dict(
                                 angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=18)),
                                 radialaxis=dict(tickfont=dict(size=18), ticksuffix="%", angle=90),
                             ),
-                            legend=dict(title=dict(text="m/s"), orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
+                            legend=dict(orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
                             margin=dict(l=20, r=200, t=40, b=80),
                             height=640,
                             width=PLOT_WIDTH,
@@ -817,24 +810,27 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                     w_sum = df.loc[summer_mask, list(needed)].dropna()
                     if len(w_sum) > 0:
                         st.markdown("---")
-                        st.subheader("Windrose – Summer (Q2–Q3)")
-                        fig_summer = _windrose_from_subset(w_sum, "Windrose – Summer (Q2–Q3)")
+                        st.subheader("Windrose - Summer (Q2-Q3)")
+                        fig_summer = _windrose_from_subset(w_sum, "Windrose - Summer (Q2-Q3)")
                         if fig_summer is not None:
                             st.plotly_chart(fig_summer)
+                            calm_pct_sum = float(((w_sum["Wind Speed (m/s)"] < 0.2).mean()) * 100.0)
+                            st.caption(f"Calm (<0.2 m/s): {calm_pct_sum:.1f}% of hours")
 
                     # Winter (Q4–Q1)
                     w_win = df.loc[winter_mask, list(needed)].dropna()
                     if len(w_win) > 0:
                         st.markdown("---")
-                        st.subheader("Windrose – Winter (Q4–Q1)")
-                        fig_winter = _windrose_from_subset(w_win, "Windrose – Winter (Q4–Q1)")
+                        st.subheader("Windrose - Winter (Q4-Q1)")
+                        fig_winter = _windrose_from_subset(w_win, "Windrose - Winter (Q4-Q1)")
                         if fig_winter is not None:
                             st.plotly_chart(fig_winter)
+                            calm_pct_win = float(((w_win["Wind Speed (m/s)"] < 0.2).mean()) * 100.0)
+                            st.caption(f"Calm (<0.2 m/s): {calm_pct_win:.1f}% of hours")
                 except Exception:
                     pass
 
-                # Calm hours percentage (<0.2 m/s)
-                st.caption(f"Calm (<0.2 m/s): {calm_pct:.1f}% of hours")
+                # per-chart calm captions added above
         else:
             st.info("Wind speed/direction columns not found in data.")
 
