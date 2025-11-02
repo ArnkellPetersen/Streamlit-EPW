@@ -636,7 +636,6 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         numeric_cols = [
             "Dry Bulb Temperature (C)",
             "Relative Humidity (%)",
-            "Atmospheric Station Pressure (Pa)",
             "Global Horizontal Radiation (Wh/m2)",
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
