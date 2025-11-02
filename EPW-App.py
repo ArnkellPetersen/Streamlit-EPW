@@ -359,6 +359,15 @@ PLOT_WIDTH = _get_container_width()
 def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) -> dict:
     df = st.session_state.df
     plot_df = df[list(cols)]
+    # Guard against NaT in index which breaks resample
+    try:
+        mask = plot_df.index.notna()
+        plot_df = plot_df.loc[mask]
+    except Exception:
+        # If index check fails for any reason, fallback to dropping any NaT-like entries via reset
+        plot_df = plot_df.reset_index().dropna(subset=[plot_df.index.name]).set_index(plot_df.index.name)
+    if plot_df.empty:
+        return go.Figure().update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width).to_dict()
     fig = go.Figure()
     if res == "Hourly (raw)":
         plot_df = plot_df.round(1)
@@ -366,7 +375,10 @@ def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) ->
             fig.add_trace(go.Scattergl(x=plot_df.index, y=plot_df[col], name=col, mode="lines"))
     else:
         rule = {"Daily mean": "D", "Weekly mean": "W", "Monthly mean": "M"}[res]
-        agg_df = plot_df.resample(rule).mean().round(1)
+        # Resample requires a valid DatetimeIndex without NaT
+        agg_df = plot_df.sort_index().resample(rule).mean().round(1)
+        if agg_df.empty:
+            return go.Figure().update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width).to_dict()
         for col in agg_df.columns:
             fig.add_trace(go.Scatter(x=agg_df.index, y=agg_df[col], name=col, mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width)
