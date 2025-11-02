@@ -36,6 +36,7 @@ EPW_COLS = [
     "Dry Bulb Temperature (C)",
     "Dew Point Temperature (C)",
     "Relative Humidity (%)",
+    "Atmospheric Station Pressure (Pa)",
     "Extraterrestrial Horizontal Radiation (Wh/m2)",
     "Extraterrestrial Direct Normal Radiation (Wh/m2)",
     "Horizontal Infrared Radiation Intensity (Wh/m2)",
@@ -331,7 +332,7 @@ with left:
     st.caption("Drop a .epw file, or paste a direct .epw URL.")
 with right:
     try:
-        st.image("Logos/NMBU_Logo_English_RGB.png", caption="", width='stretch')
+        st.image("Logos/NMBU_Logo_English_RGB.png", caption="", width=600)
     except Exception:
         pass
 
@@ -356,18 +357,9 @@ PLOT_WIDTH = _get_container_width()
 
 # Cached chart builders to avoid redraw cost on reruns/tab switches
 @st.cache_data(show_spinner=False)
-def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) -> dict:
+def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) -> go.Figure:
     df = st.session_state.df
     plot_df = df[list(cols)]
-    # Guard against NaT in index which breaks resample
-    try:
-        mask = plot_df.index.notna()
-        plot_df = plot_df.loc[mask]
-    except Exception:
-        # If index check fails for any reason, fallback to dropping any NaT-like entries via reset
-        plot_df = plot_df.reset_index().dropna(subset=[plot_df.index.name]).set_index(plot_df.index.name)
-    if plot_df.empty:
-        return go.Figure().update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width).to_dict()
     fig = go.Figure()
     if res == "Hourly (raw)":
         plot_df = plot_df.round(1)
@@ -375,16 +367,13 @@ def build_time_series_fig(source_key: str, cols: tuple, res: str, width: int) ->
             fig.add_trace(go.Scattergl(x=plot_df.index, y=plot_df[col], name=col, mode="lines"))
     else:
         rule = {"Daily mean": "D", "Weekly mean": "W", "Monthly mean": "M"}[res]
-        # Resample requires a valid DatetimeIndex without NaT
-        agg_df = plot_df.sort_index().resample(rule).mean().round(1)
-        if agg_df.empty:
-            return go.Figure().update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width).to_dict()
+        agg_df = plot_df.resample(rule).mean().round(1)
         for col in agg_df.columns:
             fig.add_trace(go.Scatter(x=agg_df.index, y=agg_df[col], name=col, mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420, width=width)
     # Show months on x-axis (no year)
     fig.update_xaxes(dtick="M1", tickformat="%b")
-    return fig.to_dict()
+    return fig
 
 @st.cache_data(show_spinner=False)
 def build_radiation_fig(source_key: str, width: int) -> dict:
@@ -399,20 +388,15 @@ def build_radiation_fig(source_key: str, width: int) -> dict:
         fig.add_trace(go.Scatter(x=df.index, y=df[col].round(1), name=col, mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
     fig.update_xaxes(dtick="M1", tickformat="%b")
-    return fig.to_dict()
+    return fig
 
 @st.cache_data(show_spinner=False)
 def build_wind_speed_fig(source_key: str, width: int) -> dict:
     df = st.session_state.df
-    sdf = df
-    try:
-        sdf = df.loc[df.index.notna()].sort_index()
-    except Exception:
-        pass
-    fig = go.Figure(go.Scatter(x=sdf.index, y=sdf["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
+    fig = go.Figure(go.Scatter(x=df.index, y=df["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
     fig.update_xaxes(dtick="M1", tickformat="%b")
-    return fig.to_dict()
+    return fig
 
 @st.cache_data(show_spinner=False)
 def build_windrose_fig_cached(source_key: str, width: int) -> dict:
@@ -426,7 +410,6 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
     speeds = np.clip(w["Wind Speed (m/s)"].to_numpy(dtype=float), a_min=0, a_max=None)
     dirs = (w["Wind Direction (deg)"].to_numpy(dtype=float) % 360.0)
     calm_mask = speeds < 0.2
-    calm_pct = float(calm_mask.mean() * 100.0)
     nb = 16
     sector_width = 360.0 / nb
     dirs_nc = dirs[~calm_mask]
@@ -454,11 +437,11 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
             radialaxis=dict(tickfont=dict(size=18), ticksuffix="%", angle=90),
         ),
         legend=dict(orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
-        margin=dict(l=20, r=200, t=40, b=30),
+        margin=dict(l=20, r=200, t=40, b=20),
         height=640,
         width=width,
     )
-    return fig.to_dict()
+    return fig
 
 @st.cache_data(show_spinner=False)
 def compute_heatmap_grid(source_key: str, var: str) -> pd.DataFrame:
@@ -507,15 +490,15 @@ if param_url_override:
     example_url = param_url_override
 
 with st.sidebar:
-    st.header("Settings")
+    st.header("Select EPW-File")
     uploaded = st.file_uploader(
         "Upload EPW",
         type=["epw"],
         help="Drag and drop a .epw file here or browse",
     )
     url = st.text_input("EPW URL", value=example_url, help="Direct URL to a .epw file")
-    st.markdown("---")
-    # Tip removed per request
+    #st.markdown("---")
+    #st.write("Tip: Works with any reachable URL. For private files, host behind a temporary link.")
 
 # --- Session state for auto-load and dedup ---
 if "last_url" not in st.session_state:
@@ -581,17 +564,17 @@ if st.session_state.df is not None and st.session_state.meta is not None:
 
     # ---- Sidebar metadata
     with st.sidebar:
-        st.caption("Location")
+        st.subheader("Location")
         city = (meta.get("city") or "").strip()
         region = (meta.get("region") or "").strip()
         country = (meta.get("country") or "").strip()
         # Hide 'None' or empty regions and avoid odd punctuation
         show_region = region and region.lower() != "none"
         if show_region:
-            loc_line = f"{city}, {region} {country}".strip()
+            loc_line = f"**{city}**, {region} {country}".strip()
         else:
-            loc_line = f"{city} {country}".strip()
-        st.markdown(f"<div style='font-size: 26px; font-weight: 600; line-height: 1.2'>{loc_line}</div>", unsafe_allow_html=True)
+            loc_line = f"**{city}** {country}".strip()
+        st.write(loc_line)
         colA, colB = st.columns(2)
         with colA:
             st.metric("Latitude", f"{meta.get('latitude', np.nan):.4f}")
@@ -615,8 +598,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     st.markdown("---")
 
     # Tabs
-    tab_map, tab_ts, tab_xy, tab_heat, tab_windrose, tab_month, tab_table = st.tabs([
-        "Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table",
+    tab_map, tab_ts, tab_xy, tab_heat, tab_windrose, tab_month, tab_table = st.tabs(["Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table",
     ])
     # ---- Map
     with tab_map:
@@ -645,11 +627,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=1)
         if sel:
             fig_dict = build_time_series_fig(st.session_state.source_key, tuple(sel), res, PLOT_WIDTH)
-            fig_obj = go.Figure(fig_dict)
-            if len(fig_obj.data) == 0:
-                st.info("No time series data available after filtering invalid timestamps.")
-            else:
-                st.plotly_chart(fig_obj, theme="streamlit", config={"staticPlot": True})
+            st.plotly_chart(fig_dict, theme="streamlit")
         st.caption("Choose resolution to reduce points; timestamps normalized to start-of-hour.")
 
     # ---- XY Scatter
@@ -658,6 +636,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         numeric_cols = [
             "Dry Bulb Temperature (C)",
             "Relative Humidity (%)",
+            "Atmospheric Station Pressure (Pa)",
             "Global Horizontal Radiation (Wh/m2)",
             "Direct Normal Radiation (Wh/m2)",
             "Diffuse Horizontal Radiation (Wh/m2)",
@@ -685,8 +664,6 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                 .interactive()
             )
             st.altair_chart(chart)
-
-    
 
     # ---- Windrose
     with tab_windrose:
@@ -929,7 +906,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             if st.session_state.show_table and st.button("Hide table"):
                 st.session_state.show_table = False
         if st.session_state.show_table:
-            st.dataframe(df, width='stretch')
+            st.dataframe(df, use_container_width=True)
         else:
             st.info("Press 'Show table' to render the full dataset.")
 
