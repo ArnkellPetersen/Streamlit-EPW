@@ -404,7 +404,12 @@ def build_radiation_fig(source_key: str, width: int) -> dict:
 @st.cache_data(show_spinner=False)
 def build_wind_speed_fig(source_key: str, width: int) -> dict:
     df = st.session_state.df
-    fig = go.Figure(go.Scatter(x=df.index, y=df["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
+    sdf = df
+    try:
+        sdf = df.loc[df.index.notna()].sort_index()
+    except Exception:
+        pass
+    fig = go.Figure(go.Scatter(x=sdf.index, y=sdf["Wind Speed (m/s)"].round(1), name="Wind Speed (m/s)", mode="lines"))
     fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=300, width=width)
     fig.update_xaxes(dtick="M1", tickformat="%b")
     return fig.to_dict()
@@ -640,7 +645,11 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=1)
         if sel:
             fig_dict = build_time_series_fig(st.session_state.source_key, tuple(sel), res, PLOT_WIDTH)
-            st.plotly_chart(go.Figure(fig_dict), theme="streamlit", config={"staticPlot": True})
+            fig_obj = go.Figure(fig_dict)
+            if len(fig_obj.data) == 0:
+                st.info("No time series data available after filtering invalid timestamps.")
+            else:
+                st.plotly_chart(fig_obj, theme="streamlit", config={"staticPlot": True})
         st.caption("Choose resolution to reduce points; timestamps normalized to start-of-hour.")
 
     # ---- XY Scatter
