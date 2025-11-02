@@ -410,6 +410,7 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
     speeds = np.clip(w["Wind Speed (m/s)"].to_numpy(dtype=float), a_min=0, a_max=None)
     dirs = (w["Wind Direction (deg)"].to_numpy(dtype=float) % 360.0)
     calm_mask = speeds < 0.2
+    calm_pct = float(calm_mask.mean() * 100.0)
     nb = 16
     sector_width = 360.0 / nb
     dirs_nc = dirs[~calm_mask]
@@ -431,13 +432,13 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
     for j, label in enumerate(cat_labels):
         fig.add_trace(go.Barpolar(theta=angle_centers, r=perc[:, j], width=widths, name=label, marker_color=cat_colors[j], marker_line_color="white", marker_line_width=0.5, opacity=0.9))
     fig.update_layout(
-        title=dict(text="Windrose (frequency by direction)", font=dict(size=10)),
+        title=dict(text=f"Windrose (frequency by direction) — Calm: {calm_pct:.1f}%", font=dict(size=20)),
         polar=dict(
-            angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=9)),
-            radialaxis=dict(tickfont=dict(size=9), ticksuffix="%", angle=90),
+            angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=18)),
+            radialaxis=dict(tickfont=dict(size=18), ticksuffix="%", angle=90),
         ),
-        legend=dict(orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=9)),
-        margin=dict(l=20, r=200, t=40, b=20),
+        legend=dict(title=dict(text="m/s"), orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
+        margin=dict(l=20, r=200, t=40, b=80),
         height=640,
         width=width,
     )
@@ -628,7 +629,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         res = st.selectbox("Resolution", ["Hourly (raw)", "Daily mean", "Weekly mean", "Monthly mean"], index=0)
         if sel:
             fig_dict = build_time_series_fig(st.session_state.source_key, tuple(sel), res, PLOT_WIDTH)
-            st.plotly_chart(go.Figure(fig_dict), theme="streamlit")
+            st.plotly_chart(go.Figure(fig_dict), theme="streamlit", config={"staticPlot": True})
         st.caption("Choose resolution to reduce points; timestamps normalized to start-of-hour.")
 
     # ---- XY Scatter
@@ -736,34 +737,101 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                         )
                     )
 
+                title_text = f"Windrose (frequency by direction) — Calm: {calm_pct:.1f}%"
                 fig.update_layout(
-                    title=dict(text="Windrose (frequency by direction)", font=dict(size=10)),
+                    title=dict(text=title_text, font=dict(size=20)),
                     polar=dict(
                         angularaxis=dict(
                             direction="clockwise",
                             rotation=90,  # 0° at North
-                            tickfont=dict(size=9),
+                            tickfont=dict(size=18),
                         ),
                         radialaxis=dict(
-                            tickfont=dict(size=9),
+                            tickfont=dict(size=18),
                             ticksuffix="%",
                             angle=90,
                         ),
                     ),
                     legend=dict(
+                        title=dict(text="m/s"),
                         orientation="v",
                         x=1.2,
                         xanchor="left",
                         y=0.5,
                         yanchor="middle",
-                        font=dict(size=9),
+                        font=dict(size=18),
                     ),
-                    margin=dict(l=20, r=200, t=40, b=20),
+                    margin=dict(l=20, r=200, t=40, b=80),
                     height=640,
                 )
 
                 fig.update_layout(width=PLOT_WIDTH)
                 st.plotly_chart(fig)
+
+                # Seasonal windroses: Summer (Q2+Q3) and Winter (Q4+Q1)
+                try:
+                    q = df.index.quarter
+                    summer_mask = q.isin([2, 3])
+                    winter_mask = q.isin([4, 1])
+
+                    def _windrose_from_subset(sub_df: pd.DataFrame, title_text: str):
+                        if sub_df.empty:
+                            return None
+                        spd = np.clip(sub_df["Wind Speed (m/s)"].to_numpy(dtype=float), a_min=0, a_max=None)
+                        dr = (sub_df["Wind Direction (deg)"].to_numpy(dtype=float) % 360.0)
+                        calm_mask2 = spd < 0.2
+                        nb2 = 16
+                        sector_w = 360.0 / nb2
+                        dr_nc = dr[~calm_mask2]
+                        sp_nc = spd[~calm_mask2]
+                        sec = np.floor(dr_nc / sector_w).astype(int) % nb2
+                        edges = np.array([0.2, 1.6, 3.4, 5.5, 8.0, 10.8])
+                        idx2 = np.digitize(sp_nc, bins=edges, right=False)
+                        cat2 = np.clip(idx2 - 1, 0, 5)
+                        labels = ["0.2-1.5", "1.6-3.3", "3.4-5.4", "5.5-7.9", "8.0-10.7", "10.8+"]
+                        colors = ["#deebf7", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"]
+                        cnt = np.zeros((nb2, len(labels)), dtype=int)
+                        if len(sec) > 0:
+                            np.add.at(cnt, (sec, cat2), 1)
+                        tot = cnt.sum()
+                        perc2 = (cnt / tot * 100.0) if tot > 0 else cnt.astype(float)
+                        ang = (np.arange(nb2) * sector_w + sector_w / 2.0)
+                        widths2 = [sector_w] * nb2
+                        f2 = go.Figure()
+                        for j2, lb in enumerate(labels):
+                            f2.add_trace(go.Barpolar(theta=ang, r=perc2[:, j2], width=widths2, name=lb, marker_color=colors[j2], marker_line_color="white", marker_line_width=0.5, opacity=0.9))
+                        f2.update_layout(
+                            title=dict(text=f"{title_text} — Calm: {calm_pct2:.1f}%", font=dict(size=20)),
+                            polar=dict(
+                                angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=18)),
+                                radialaxis=dict(tickfont=dict(size=18), ticksuffix="%", angle=90),
+                            ),
+                            legend=dict(title=dict(text="m/s"), orientation="v", x=1.2, xanchor="left", y=0.5, yanchor="middle", font=dict(size=18)),
+                            margin=dict(l=20, r=200, t=40, b=80),
+                            height=640,
+                            width=PLOT_WIDTH,
+                        )
+                        return f2
+
+                    # Summer (Q2–Q3)
+                    w_sum = df.loc[summer_mask, list(needed)].dropna()
+                    if len(w_sum) > 0:
+                        st.markdown("---")
+                        st.subheader("Windrose – Summer (Q2–Q3)")
+                        fig_summer = _windrose_from_subset(w_sum, "Windrose – Summer (Q2–Q3)")
+                        if fig_summer is not None:
+                            st.plotly_chart(fig_summer)
+
+                    # Winter (Q4–Q1)
+                    w_win = df.loc[winter_mask, list(needed)].dropna()
+                    if len(w_win) > 0:
+                        st.markdown("---")
+                        st.subheader("Windrose – Winter (Q4–Q1)")
+                        fig_winter = _windrose_from_subset(w_win, "Windrose – Winter (Q4–Q1)")
+                        if fig_winter is not None:
+                            st.plotly_chart(fig_winter)
+                except Exception:
+                    pass
 
                 # Calm hours percentage (<0.2 m/s)
                 st.caption(f"Calm (<0.2 m/s): {calm_pct:.1f}% of hours")
