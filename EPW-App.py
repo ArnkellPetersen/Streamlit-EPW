@@ -449,17 +449,37 @@ def build_windrose_fig_cached(source_key: str, width: int) -> dict:
 
 @st.cache_data(show_spinner=False)
 def compute_heatmap_grid(source_key: str, var: str) -> pd.DataFrame:
+    """Build a DOY × Hour grid for a given variable from the EPW dataframe.
+
+    Cached per (source_key, var), so the grid is only computed once for each
+    EPW file + variable combination.
+    """
     df = st.session_state.df
+
+    # Prefer the EPW Hour column (end-of-hour 1..24) if available
     if "Hour" in df.columns:
-        hours = pd.to_numeric(df["Hour"], errors="coerce").fillna(1).astype(int).clip(1, 24)
+        hours = (
+            pd.to_numeric(df["Hour"], errors="coerce")
+            .fillna(1)
+            .astype(int)
+            .clip(1, 24)
+        )
     else:
         hours = (df.index.hour + 1).astype(int)
-    grid_src = pd.DataFrame({
-        "DOY": df.index.dayofyear,
-        "Hour": hours.values,
-        "Value": df[var].values,
-    }, index=df.index)
-    return grid_src.drop_duplicates(subset=["DOY", "Hour"])[["DOY", "Hour", "Value"]]
+
+    grid_src = pd.DataFrame(
+        {
+            "DOY": df.index.dayofyear,
+            "Hour": hours.values,
+            "Value": df[var].values,
+        },
+        index=df.index,
+    )
+
+    # Keep a single hourly value per DOY×Hour; drop duplicates if any (no aggregation)
+    grid = grid_src.drop_duplicates(subset=["DOY", "Hour"])[["DOY", "Hour", "Value"]]
+    return grid
+
 
 @st.cache_data(show_spinner=False)
 def compute_xy_tidy(source_key: str, x_var: str, y_vars: tuple) -> pd.DataFrame:
@@ -852,6 +872,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     # ---- Heatmap
     elif active == "Heatmap":
         st.subheader("Heatmap of a time series (Day-of-year × Hour)")
+
         heat_cols = [
             "Dry Bulb Temperature (C)",
             "Relative Humidity (%)",
@@ -863,33 +884,30 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         ]
         var = st.selectbox("Variable", heat_cols, index=0)
 
-        # Build Day-of-year (1..366) × Hour (1..24 from EPW) grid
-        # Prefer the EPW Hour column (end-of-hour 1..24) if available
-        if "Hour" in df.columns:
-            hours = pd.to_numeric(df["Hour"], errors="coerce").fillna(1).astype(int).clip(1, 24)
-        else:
-            hours = (df.index.hour + 1).astype(int)
+        # Use cached DOY × Hour grid
+        grid = compute_heatmap_grid(st.session_state.source_key, var)
 
-        grid_src = pd.DataFrame({
-            "DOY": df.index.dayofyear,
-            "Hour": hours.values,
-            var: df[var].values,
-        }, index=df.index)
-        # Keep a single hourly value per DOY×Hour; drop duplicates if any (no aggregation)
-        grid = grid_src.drop_duplicates(subset=["DOY", "Hour"]).rename(columns={var: "Value"})[["DOY", "Hour", "Value"]]
-
-        # round values for display
+        # Round values for display
         grid["Value"] = pd.to_numeric(grid["Value"], errors="coerce").round(1)
+
         heat = (
             alt.Chart(grid)
             .mark_rect()
             .encode(
                 x=alt.X("DOY:O", title="Day of year (1-366)"),
                 y=alt.Y("Hour:O", title="Hour of day (1-24)"),
-                color=alt.Color("Value:Q", title=f"{var}", scale=alt.Scale(scheme="viridis")),
-                tooltip=["DOY", "Hour", alt.Tooltip("Value:Q", format=".1f")],
+                color=alt.Color(
+                    "Value:Q",
+                    title=f"{var}",
+                    scale=alt.Scale(scheme="viridis"),
+                ),
+                tooltip=[
+                    "DOY",
+                    "Hour",
+                    alt.Tooltip("Value:Q", format=".1f"),
+                ],
             )
-            .properties(height=360, width=PLOT_WIDTH-40)
+            .properties(height=360, width=PLOT_WIDTH - 40)
         )
         st.altair_chart(heat)
 
