@@ -1,6 +1,6 @@
 # Streamlit‑EPW — Climate Data Explorer
 
-A fast, research‑grade Streamlit app for exploring **EPW weather files** and derived climate metrics for building simulation. The app is developed by the **NMBU Building Physics — Climate & Buildings** group and targets workflows in **EnergyPlus/LadybugTools/IDA ICE/PVsyst** and related tools.
+A fast,  Streamlit app for exploring **EPW weather files** and derived climate metrics for building simulation. The app is developed by the **NMBU Building Physics — Climate & Buildings** group as a test of the usability of streamlit for such purposes. 
 
 ---
 
@@ -51,9 +51,8 @@ Streamlit-EPW/
 
 ## Configuration
 
-- **Python**: 3.10+ recommended
+- **Python**: 3.13+ recommended
 - **Key packages**: `streamlit`, `pandas`, `numpy`, `plotly>=5.20`, `altair` (optional)
-- **Optional**: add packages you need for wind roses, map tiles, or advanced metrics
 - **Large files**: keep EPWs outside the repo or use Git LFS
 
 ---
