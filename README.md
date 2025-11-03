@@ -29,8 +29,7 @@ pip install -r requirements.txt
 
 # 3) Run the app
 streamlit run EPW-App.py
-# (or if you use the stateful-nav version)
-streamlit run EPW-App_stateful_tabs.py
+
 ```
 
 > **Tip:** Streamlit apps generally feel snappiest when run **locally** with caching enabled. Avoid re-reading large files on every interaction—cache loaders and heavy transforms.
