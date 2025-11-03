@@ -659,24 +659,28 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         x_var = st.selectbox("X axis", numeric_cols, index=0)
         y_var = st.selectbox("Y axis", numeric_cols, index=1)
         if x_var and y_var:
-            plot_df = df[[x_var, y_var]].dropna().copy()
-            plot_df[x_var] = plot_df[x_var].round(1)
-            plot_df[y_var] = plot_df[y_var].round(1)
-            chart = (
-                alt.Chart(plot_df)
-                .mark_circle(size=28, opacity=0.4)
-                .encode(
-                    x=alt.X(f"{x_var}:Q", title=x_var),
-                    y=alt.Y(f"{y_var}:Q", title=y_var),
-                    tooltip=[
-                        alt.Tooltip(f"{x_var}:Q", title=x_var, format=".1f"),
-                        alt.Tooltip(f"{y_var}:Q", title=y_var, format=".1f"),
-                    ],
+            if x_var == y_var:
+                st.error("XY scatter requires two **different** variables. "
+                         "Please choose different columns for X and Y.")
+            else:
+                plot_df = df[[x_var, y_var]].dropna().copy()
+                plot_df[x_var] = plot_df[x_var].round(1)
+                plot_df[y_var] = plot_df[y_var].round(1)
+                chart = (
+                    alt.Chart(plot_df)
+                    .mark_circle(size=28, opacity=0.4)
+                    .encode(
+                        x=alt.X(f"{x_var}:Q", title=x_var),
+                        y=alt.Y(f"{y_var}:Q", title=y_var),
+                        tooltip=[
+                            alt.Tooltip(f"{x_var}:Q", title=x_var, format=".1f"),
+                            alt.Tooltip(f"{y_var}:Q", title=y_var, format=".1f"),
+                        ],
+                    )
+                    .properties(height=360, width=PLOT_WIDTH-40)
+                    .interactive()
                 )
-                .properties(height=360, width=PLOT_WIDTH-40)
-                .interactive()
-            )
-            st.altair_chart(chart)
+                st.altair_chart(chart)
 
     # ---- Windrose
     elif active == "Windrose":
