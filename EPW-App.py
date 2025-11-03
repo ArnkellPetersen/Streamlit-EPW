@@ -332,7 +332,7 @@ with left:
     st.caption("Drop a .epw file, or paste a direct .epw URL.")
 with right:
     try:
-        st.image("Logos/NMBU_Logo_English_RGB.png", caption="", width=600)
+        st.image("Logos/NMBU_Logo_English_RGB.png", caption="", width=400)
     except Exception:
         pass
 
@@ -353,7 +353,11 @@ def _get_container_width(default: int = 1000) -> int:
     except Exception:
         return default
 
-PLOT_WIDTH = _get_container_width()
+# Freeze container width for this session to avoid resize-triggered reruns
+if "PLOT_WIDTH" not in st.session_state:
+    st.session_state.PLOT_WIDTH = _get_container_width()
+PLOT_WIDTH = st.session_state.PLOT_WIDTH
+
 
 # Cached chart builders to avoid redraw cost on reruns/tab switches
 @st.cache_data(show_spinner=False)
@@ -598,10 +602,20 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     st.markdown("---")
 
     # Tabs
-    tab_map, tab_ts, tab_xy, tab_heat, tab_windrose, tab_month, tab_table = st.tabs(["Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table",
-    ])
+    NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table"]
+
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "Map"
+
+    active = st.radio(
+        "Section",
+        NAV_ITEMS,
+        index=NAV_ITEMS.index(st.session_state.active_tab),
+        horizontal=True,  # optional, looks more like tabs
+        key="nav_tab",
+    )
     # ---- Map
-    with tab_map:
+    if active == "Map":
         st.subheader("Location map")
         lat = meta.get("latitude", np.nan)
         lon = meta.get("longitude", np.nan)
@@ -612,7 +626,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             st.info("This EPW lacks valid latitude/longitude metadata.")
 
     # ---- Time Series
-    with tab_ts:
+    elif active == "Time Series":
         st.subheader("Time Series: Temp, Radiation, Wind, RH")
         cols = [
             "Dry Bulb Temperature (C)",
@@ -631,7 +645,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         st.caption("Choose resolution to reduce points; timestamps normalized to start-of-hour.")
 
     # ---- XY Scatter
-    with tab_xy:
+    elif active == "XY Scatter":
         st.subheader("XY Scatter: choose X and Y variables")
         numeric_cols = [
             "Dry Bulb Temperature (C)",
@@ -665,7 +679,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             st.altair_chart(chart)
 
     # ---- Windrose
-    with tab_windrose:
+    elif active == "Windrose":
         st.subheader("Wind time series and windrose")
 
         # Show wind speed time series for full period
@@ -832,7 +846,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             st.info("Wind speed/direction columns not found in data.")
 
     # ---- Heatmap
-    with tab_heat:
+    elif active == "Heatmap":
         st.subheader("Heatmap of a time series (Day-of-year × Hour)")
         heat_cols = [
             "Dry Bulb Temperature (C)",
@@ -876,7 +890,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         st.altair_chart(heat)
 
     # ---- Monthly aggregates
-    with tab_month:
+    elif active == "Monthly":
         st.subheader("Monthly summary by Year")
         monthly = compute_monthly_agg(st.session_state.source_key, df)
         # Backward-compatible: add Month Name if missing (e.g., cached older result)
@@ -893,7 +907,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         st.dataframe(monthly[display_cols], width='stretch', height=520)
 
     # ---- Table
-    with tab_table:
+    elif active == "Table":
         st.subheader("Raw (parsed) data table")
         if "show_table" not in st.session_state:
             st.session_state.show_table = False
