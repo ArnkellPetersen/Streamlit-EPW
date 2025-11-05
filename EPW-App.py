@@ -647,7 +647,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     c5.metric("Wind mean (m/s)", f"{m['Mean wind (m/s)']:.1f}")
     c6.metric("Rows", f"{m['Records']}")
 
-    st.markdown("---")
+    #st.markdown("---")
 
     # Tabs
     NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table"]
@@ -655,13 +655,18 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Map"
 
+    
+    st.subheader("Section")
+    
     active = st.radio(
-        "Section",
-        NAV_ITEMS,
-        index=NAV_ITEMS.index(st.session_state.active_tab),
-        horizontal=True,  # optional, looks more like tabs
-        key="nav_tab",
-    )
+            "Section",
+            NAV_ITEMS,
+            index=NAV_ITEMS.index(st.session_state.active_tab),
+            horizontal=True,
+            key="nav_tab",
+            label_visibility="collapsed",
+        )
+
     # ---- Map
     if active == "Map":
         st.subheader("Location map")
