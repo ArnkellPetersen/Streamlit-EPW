@@ -491,27 +491,46 @@ example_url = (
     "https://klimadataforbygninger.no/FATMY/epw/TMY-NO-1991-2020/TMYNO_Oslo_CERRA_1991-2020.epw"
 )
 
-# Allow overriding the default via URL query params, e.g. ?epw=HTTPS_URL or ?url=HTTPS_URL
+# Allow overriding the default via URL query params (case-insensitive), e.g. ?epw=HTTPS_URL or ?url=HTTPS_URL
 def _query_param_url() -> str | None:
+    # Try modern API first
     try:
-        qp = st.query_params  # modern API
-        v = qp.get("epw") or qp.get("url")
+        qp = st.query_params  # may be a mapping-like object
+        try:
+            items = qp.to_dict() if hasattr(qp, "to_dict") else dict(qp)
+        except Exception:
+            items = dict(qp)
+        items_lower = {str(k).lower(): v for k, v in items.items()}
+        v = items_lower.get("epw") or items_lower.get("url")
         if isinstance(v, (list, tuple)):
             return v[0] if v else None
         return v
     except Exception:
+        # Fallback to legacy API which returns lists
         try:
-            qp = st.experimental_get_query_params()  # legacy API returns lists
-            v = qp.get("epw") or qp.get("url")
-            if isinstance(v, list) and v:
-                return v[0]
+            qp = st.experimental_get_query_params()
+            items_lower = {str(k).lower(): v for k, v in qp.items()}
+            v = items_lower.get("epw") or items_lower.get("url")
+            if isinstance(v, list):
+                return v[0] if v else None
             return v
         except Exception:
             return None
 
 param_url_override = _query_param_url()
-if param_url_override:
-    example_url = param_url_override
+# Initialize widget state from query param if present; otherwise use default example_url
+initial_url = param_url_override or example_url
+if "epw_url" not in st.session_state:
+    st.session_state["epw_url"] = initial_url
+    # If no URL param provided, reflect the default into the URL bar for shareable links
+    if param_url_override is None:
+        try:
+            st.query_params["url"] = initial_url
+        except Exception:
+            try:
+                st.experimental_set_query_params(url=initial_url)
+            except Exception:
+                pass
 
 with st.sidebar:
     st.header("Select EPW-File")
@@ -520,7 +539,15 @@ with st.sidebar:
         type=["epw"],
         help="Drag and drop a .epw file here or browse",
     )
-    url = st.text_input("EPW URL", value=example_url, help="Direct URL to a .epw file")
+    url = st.text_input("EPW URL", key="epw_url", help="Direct URL to a .epw file")
+    # Keep the URL bar synchronized with the widget value for easy sharing
+    try:
+        st.query_params["url"] = url
+    except Exception:
+        try:
+            st.experimental_set_query_params(url=url)
+        except Exception:
+            pass
     #st.markdown("---")
     #st.write("Tip: Works with any reachable URL. For private files, host behind a temporary link.")
 
@@ -588,23 +615,24 @@ if st.session_state.df is not None and st.session_state.meta is not None:
 
     # ---- Sidebar metadata
     with st.sidebar:
-        st.subheader("Location")
+        #st.header("Location")
         city = (meta.get("city") or "").strip()
         region = (meta.get("region") or "").strip()
         country = (meta.get("country") or "").strip()
         # Hide 'None' or empty regions and avoid odd punctuation
         show_region = region and region.lower() != "none"
         if show_region:
-            loc_line = f"**{city}**, {region} {country}".strip()
+            loc_line = f"{city}, {region} {country}".strip()
         else:
-            loc_line = f"**{city}** {country}".strip()
-        st.write(loc_line)
+            loc_line = f"{city} {country}".strip()
+        #st.write(loc_line)
+        st.metric("Location", loc_line)
         colA, colB = st.columns(2)
         with colA:
-            st.metric("Latitude", f"{meta.get('latitude', np.nan):.4f}")
+            st.metric("Latitude", f"{meta.get('latitude', np.nan):.1f}")
             st.metric("Timezone (h)", f"{meta.get('timezone_hours', 0):.1f}")
         with colB:
-            st.metric("Longitude", f"{meta.get('longitude', np.nan):.4f}")
+            st.metric("Longitude", f"{meta.get('longitude', np.nan):.1f}")
             st.metric("Elevation (m)", f"{meta.get('elevation_m', np.nan):.0f}")
 
     # ---- Overview
