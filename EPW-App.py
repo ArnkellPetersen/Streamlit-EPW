@@ -650,7 +650,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     #st.markdown("---")
 
     # Tabs
-    NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Heatmap", "Windrose", "Monthly", "Table"]
+    NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Duration Curve", "Heatmap", "Windrose", "Monthly", "Table"]
 
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Map"
@@ -734,6 +734,54 @@ if st.session_state.df is not None and st.session_state.meta is not None:
                     .interactive()
                 )
                 st.altair_chart(chart)
+
+    # ---- Duration Curve
+    elif active == "Duration Curve":
+        st.subheader("Duration Curve (sorted values)")
+
+        numeric_cols = [
+            "Dry Bulb Temperature (C)",
+            "Relative Humidity (%)",
+            "Global Horizontal Radiation (Wh/m2)",
+            "Direct Normal Radiation (Wh/m2)",
+            "Diffuse Horizontal Radiation (Wh/m2)",
+            "Wind Speed (m/s)",
+            "Wind Direction (deg)",
+        ]
+        
+        var = st.selectbox("Variable", numeric_cols, index=0)
+
+        if var:
+            series = df[var].dropna().astype(float)
+            sorted_vals = np.sort(series)[::-1]   # descending
+            n = len(sorted_vals)
+            x = np.arange(1, n+1)
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=sorted_vals,
+                    mode="lines",
+                    name=var
+                )
+            )
+            fig.update_layout(
+                title=f"Duration Curve for {var}",
+                xaxis_title="Ranked hour (1 = highest value)",
+                yaxis_title=var,
+                width=PLOT_WIDTH,
+                height=420,
+                margin=dict(l=10, r=10, t=40, b=10),
+            )
+            st.plotly_chart(fig, theme="streamlit")
+            
+            st.caption(
+                "A duration curve shows all values sorted in descending order. "
+                "This is useful for HVAC sizing, solar potential estimation, "
+                "and checking extremes independent of time ordering."
+            )
+
 
     # ---- Windrose
     elif active == "Windrose":
