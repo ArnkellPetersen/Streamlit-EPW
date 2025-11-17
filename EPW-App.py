@@ -668,15 +668,61 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         )
 
     # ---- Map
+    # ---- Map (pydeck minimal)
+    import pydeck as pdk
     if active == "Map":
         st.subheader("Location map")
+
         lat = meta.get("latitude", np.nan)
         lon = meta.get("longitude", np.nan)
+
         if pd.notna(lat) and pd.notna(lon):
-            st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
+
+            # A tiny GeoJSON feature with 1 point
+            geojson = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [lon, lat],
+                        },
+                        "properties": {"name": "EPW location"},
+                    }
+                ],
+            }
+
+            # Minimal GeoJsonLayer (very fast!)
+            layer = pdk.Layer(
+                "GeoJsonLayer",
+                data=geojson,
+                pickable=True,
+                filled=True,
+                pointRadiusMinPixels=6,
+                get_fill_color=[0, 128, 255, 200],  # blue marker
+            )
+
+            view = pdk.ViewState(
+                latitude=lat,
+                longitude=lon,
+                zoom=9,
+                pitch=0,
+            )
+
+            r = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view,
+                map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                tooltip={"text": "{name}"},
+                height=500,
+            )
+
+            st.pydeck_chart(r)
             st.caption(f"Pin at latitude {lat:.4f}, longitude {lon:.4f}.")
         else:
             st.info("This EPW lacks valid latitude/longitude metadata.")
+
 
     # ---- Time Series
     elif active == "Time Series":
@@ -778,9 +824,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             
             st.caption(
                 "A duration curve shows all values sorted in descending order. "
-                "This is useful for HVAC sizing, solar potential estimation, "
-                "and checking extremes independent of time ordering."
-            )
+                )
 
 
     # ---- Windrose
