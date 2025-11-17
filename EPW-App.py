@@ -650,7 +650,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
     #st.markdown("---")
 
     # Tabs
-    NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Duration Curve", "Heatmap", "Windrose", "Monthly", "Table"]
+    NAV_ITEMS = ["Map", "Time Series", "XY Scatter", "Duration Curve", "Heatmap", "Windrose", "Monthly","Download", "Table"]
 
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Map"
@@ -1052,6 +1052,54 @@ if st.session_state.df is not None and st.session_state.meta is not None:
         display_cols = ["Month Name"] + [c for c in monthly.columns if c not in ("Month Name", "Year", "Month")]
         # Ensure the full 13 rows (0..12) are visible without scrolling
         st.dataframe(monthly[display_cols], width='stretch', height=520)
+    # ---- Download CSV
+    elif active == "Download":
+        st.subheader("Download filtered CSV")
+
+        # Columns the user may download
+        downloadable_cols = [
+            "Dry Bulb Temperature (C)",
+            "Relative Humidity (%)",
+            "Global Horizontal Radiation (Wh/m2)",
+            "Direct Normal Radiation (Wh/m2)",
+            "Diffuse Horizontal Radiation (Wh/m2)",
+            "Wind Speed (m/s)",
+            "Wind Direction (deg)",
+        ]
+
+        selected = st.multiselect(
+            "Select variables to include",
+            downloadable_cols,
+            default=["Dry Bulb Temperature (C)"]
+        )
+
+        if not selected:
+            st.info("Select one or more variables to enable CSV download.")
+        else:
+            # Build export DataFrame
+            export_df = df.copy()
+
+            # Ensure time columns exist
+            export_df["Month"] = export_df.index.month
+            export_df["Day"] = export_df.index.day
+            export_df["Hour"] = export_df.index.hour
+            export_df["Minute"] = export_df.index.minute
+
+            # Choose order of output columns
+            out_cols = ["Month", "Day", "Hour", "Minute"] + selected
+
+            # Convert to CSV
+            csv_bytes = export_df[out_cols].to_csv(index=False).encode("utf-8")
+
+            st.download_button(
+                label="Download CSV",
+                data=csv_bytes,
+                file_name="epw_filtered_export.csv",
+                mime="text/csv"
+            )
+
+            st.caption("CSV includes Month, Day, Hour, Minute, plus your selected variables.")
+
 
     # ---- Table
     elif active == "Table":
@@ -1066,7 +1114,7 @@ if st.session_state.df is not None and st.session_state.meta is not None:
             if st.session_state.show_table and st.button("Hide table"):
                 st.session_state.show_table = False
         if st.session_state.show_table:
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width='stretch')
         else:
             st.info("Press 'Show table' to render the full dataset.")
 
